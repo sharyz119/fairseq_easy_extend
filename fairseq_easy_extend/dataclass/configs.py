@@ -40,3 +40,4 @@ class FEETextgenConfig(FairseqDataclass):
     bpe: Any = None
     tokenizer: Any = None
     ema: EMAConfig = EMAConfig()
+    output_file: str = field(default="output.txt", metadata={"help": "file to write hypotheses"})
