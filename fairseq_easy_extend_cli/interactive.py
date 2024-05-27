@@ -1,12 +1,4 @@
 #!/usr/bin/env python3 -u
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
-"""
-Translate raw text with a trained model. Batches data on-the-fly.
-"""
-
 import ast
 import fileinput
 import logging
@@ -15,7 +7,6 @@ import sys
 import time
 from argparse import Namespace
 from collections import namedtuple
-import argparse
 
 import numpy as np
 import torch
@@ -43,6 +34,7 @@ logger = logging.getLogger("fairseq_cli.interactive")
 Batch = namedtuple("Batch", "ids src_tokens src_lengths constraints")
 Translation = namedtuple("Translation", "src_str hypos pos_scores alignments")
 
+
 def buffered_read(input, buffer_size):
     buffer = []
     with fileinput.input(files=[input], openhook=fileinput.hook_encoded("utf-8")) as h:
@@ -55,19 +47,17 @@ def buffered_read(input, buffer_size):
     if len(buffer) > 0:
         yield buffer
 
+
 def make_batches(lines, cfg, task, max_positions, encode_fn):
     def encode_fn_target(x):
         return encode_fn(x)
 
     if cfg.generation.constraints:
-        # Strip (tab-delimited) constraints, if present, from input lines,
-        # store them in batch_constraints
         batch_constraints = [list() for _ in lines]
         for i, line in enumerate(lines):
             if "\t" in line:
                 lines[i], *batch_constraints[i] = line.split("\t")
 
-        # Convert each List[str] to List[Tensor]
         for i, constraint_list in enumerate(batch_constraints):
             batch_constraints[i] = [
                 task.target_dictionary.encode_line(
@@ -107,6 +97,7 @@ def make_batches(lines, cfg, task, max_positions, encode_fn):
             constraints=constraints,
         )
 
+
 def main(cfg: FairseqConfig):
     if isinstance(cfg, Namespace):
         cfg = convert_namespace_to_omegaconf(cfg)
@@ -131,17 +122,14 @@ def main(cfg: FairseqConfig):
 
     logger.info(cfg)
 
-    # Fix seed for stochastic decoding
     if cfg.common.seed is not None and not cfg.generation.no_seed_provided:
         np.random.seed(cfg.common.seed)
         utils.set_torch_seed(cfg.common.seed)
 
     use_cuda = torch.cuda.is_available() and not cfg.common.cpu
 
-    # Setup task, e.g., translation
     task = tasks.setup_task(cfg.task)
 
-    # Load ensemble
     overrides = ast.literal_eval(cfg.common_eval.model_overrides)
     logger.info("loading model(s) from {}".format(cfg.common_eval.path))
     models, _model_args = checkpoint_utils.load_model_ensemble(
@@ -153,11 +141,9 @@ def main(cfg: FairseqConfig):
         num_shards=cfg.checkpoint.checkpoint_shard_count,
     )
 
-    # Set dictionaries
     src_dict = task.source_dictionary
     tgt_dict = task.target_dictionary
 
-    # Optimize ensemble for generation
     for model in models:
         if model is None:
             continue
@@ -167,10 +153,8 @@ def main(cfg: FairseqConfig):
             model.cuda()
         model.prepare_for_inference_(cfg)
 
-    # Initialize generator
     generator = task.build_generator(models, cfg.generation)
 
-    # Handle tokenization and BPE
     tokenizer = task.build_tokenizer(cfg.tokenizer)
     bpe = task.build_bpe(cfg.bpe)
 
@@ -188,8 +172,6 @@ def main(cfg: FairseqConfig):
             x = tokenizer.decode(x)
         return x
 
-    # Load alignment dictionary for unknown word replacement
-    # (None if no unknown word replacement, empty if no path to align dictionary)
     align_dict = utils.load_align_dict(cfg.generation.replace_unk)
 
     max_positions = utils.resolve_max_positions(
@@ -227,7 +209,7 @@ def main(cfg: FairseqConfig):
             }
             translate_start_time = time.time()
             translations = task.inference_step(
-                generator, models, sample, constraints=constraints
+                generator, models, sample, constraints=constraints, sampling_method=cfg.sampling_method
             )
             translate_time = time.time() - translate_start_time
             total_translate_time += translate_time
@@ -249,7 +231,6 @@ def main(cfg: FairseqConfig):
                     )
                 )
 
-        # sort output to match input order
         for id_, src_tokens, hypos, info in sorted(results, key=lambda x: x[0]):
             src_str = ""
             if src_dict is not None:
@@ -264,7 +245,6 @@ def main(cfg: FairseqConfig):
                         )
                     )
 
-            # Process top predictions
             for hypo in hypos[: min(len(hypos), cfg.generation.nbest)]:
                 hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
                     hypo_tokens=hypo["tokens"].int().cpu(),
@@ -276,10 +256,8 @@ def main(cfg: FairseqConfig):
                     extra_symbols_to_ignore=get_symbols_to_strip_from_output(generator),
                 )
                 detok_hypo_str = decode_fn(hypo_str)
-                score = hypo["score"]  # convert to base 2
-                # original hypothesis (after tokenization and BPE)
+                score = hypo["score"]
                 print("H-{}\t{}\t{}".format(id_, score, hypo_str))
-                # detokenized hypothesis
                 print("D-{}\t{}\t{}".format(id_, score, detok_hypo_str))
                 print(
                     "P-{}\t{}".format(
@@ -287,7 +265,6 @@ def main(cfg: FairseqConfig):
                         " ".join(
                             map(
                                 lambda x: "{:.4f}".format(x),
-                                # convert from base e to base 2
                                 hypo["positional_scores"].tolist(),
                             )
                         ),
@@ -299,7 +276,6 @@ def main(cfg: FairseqConfig):
                     )
                     print("A-{}\t{}".format(id_, alignment_str))
 
-        # update running id_ counter
         start_id += len(inputs)
 
     logger.info(
@@ -308,13 +284,14 @@ def main(cfg: FairseqConfig):
         )
     )
 
+
 def cli_main():
     parser = options.get_interactive_generation_parser()
-   # In cli_main() add argument parser for sampling method
     parser.add_argument('--sampling-method', type=str, default='max', choices=['max', 'multinomial'], help='Sampling method to use: max or multinomial')
-
+    parser.add_argument('--iter-decode-with-beam', type=int, default=1, help='Beam width for iterative decoding')
     args = options.parse_args_and_arch(parser)
     distributed_utils.call_main(convert_namespace_to_omegaconf(args), main)
+
 
 if __name__ == "__main__":
     cli_main()
