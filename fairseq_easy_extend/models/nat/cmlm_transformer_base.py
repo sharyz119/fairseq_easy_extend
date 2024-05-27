@@ -38,6 +38,11 @@ class CMLMTransformerConfig(TransformerConfig):
 @register_model("cmlm_transformer_base", dataclass=CMLMTransformerConfig)
 class BaseCMLMNATransformerModel(CMLMNATransformerModel):
 
+    def __init__(self, args, encoder, decoder):
+        super().__init__(args, encoder, decoder)
+        self.sampling = getattr(args, 'sampling', False)
+        self.temperature = getattr(args, 'temperature', 1.0)
+        
     @classmethod
     def add_args(cls, parser):
         """Add model-specific arguments to the parser."""
