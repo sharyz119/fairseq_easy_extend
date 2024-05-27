@@ -54,7 +54,7 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
         model = super().build_model(cfg, task)
         return model
 
-    def forward_decoder(self, decoder_out, encoder_out, eos_penalty=None, max_iter=None, max_ratio=None, **kwargs):
+    def forward_decoder(self, decoder_out, encoder_out, eos_penalty=None, max_iter=10, max_ratio=None, **kwargs):
         """
         Run the decoder forward pass for iterative refinement.
 
@@ -62,7 +62,7 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
             decoder_out (tuple): output from the decoder containing the output tokens and states
             encoder_out (Tensor): output from the encoder
             eos_penalty (float, optional): penalty for EOS token
-            max_iter (int, optional): maximum number of iterations
+            max_iter (int, optional): maximum number of iterations (default 10)
             max_ratio (float, optional): maximum ratio of the target length to the source length
 
         Returns:
@@ -71,19 +71,27 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
                 - extra (dict): additional decoding results
         """
         for step in range(max_iter):
-            x, extra = self.decoder(
+            decoder_result = self.decoder(
                 normalize=False,
                 prev_output_tokens=decoder_out[0],
                 encoder_out=encoder_out,
                 **kwargs
             )
-            if max_iter > 1:
+            if isinstance(decoder_result, tuple):
+                x, extra = decoder_result
+            else:
+                x = decoder_result
+                extra = {}
+
+            if max_iter > 1 and eos_penalty is not None:
                 # apply length penalty
-                eos_penalty = (torch.ones(x.size(0), x.size(1), device=x.device) * eos_penalty)
-                eos_penalty = eos_penalty.masked_fill(decoder_out[0].ne(self.decoder.padding_idx), 0)
-                x = x + eos_penalty
+                eos_penalty_tensor = torch.ones_like(x) * eos_penalty
+                eos_penalty_tensor = eos_penalty_tensor.masked_fill(decoder_out[0].ne(self.decoder.padding_idx), 0)
+                x = x + eos_penalty_tensor
+
             # select top-1 (greedy decoding)
             x = x.argmax(-1)
             decoder_out = (x, extra)
 
         return decoder_out, extra
+
