@@ -96,16 +96,9 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
             eos_penalty_tensor = eos_penalty_tensor.masked_fill(decoder_out[0].ne(self.decoder.padding_idx), 0)
             x = x + eos_penalty_tensor
 
-        # Apply temperature
-        x = x / self.temperature
-
-        # Multinomial sampling if enabled, otherwise argmax
-        if self.sampling:
-            probs = F.softmax(x, dim=-1)
-            sampled_tokens = torch.multinomial(probs.view(-1, probs.size(-1)), 1).view(x.size()[:-1])
-            x = sampled_tokens
-        else:
-            x = x.argmax(-1)
+        # Multinomial sampling
+        x = F.softmax(x, dim=-1)
+        x = torch.multinomial(x.view(-1, x.size(-1)), 1).view(x.size()[:-1])
 
         decoder_out = (x, extra)
 
