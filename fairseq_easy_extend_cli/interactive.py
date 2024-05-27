@@ -15,6 +15,7 @@ import sys
 import time
 from argparse import Namespace
 from collections import namedtuple
+import argparse
 
 import numpy as np
 import torch
@@ -309,6 +310,9 @@ def main(cfg: FairseqConfig):
 
 def cli_main():
     parser = options.get_interactive_generation_parser()
+   # In cli_main() add argument parser for sampling method
+    parser.add_argument('--sampling-method', type=str, default='max', choices=['max', 'multinomial'], help='Sampling method to use: max or multinomial')
+
     args = options.parse_args_and_arch(parser)
     distributed_utils.call_main(convert_namespace_to_omegaconf(args), main)
 
