@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from fairseq.models import register_model
 from fairseq.models.nat import CMLMNATransformerModel
 from fairseq.models.transformer import TransformerConfig
@@ -54,44 +55,57 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
         model = super().build_model(cfg, task)
         return model
 
+
     def forward_decoder(self, decoder_out, encoder_out, eos_penalty=None, max_iter=10, max_ratio=None, **kwargs):
-        """
-        Run the decoder forward pass for iterative refinement.
+    """
+    Run the decoder forward pass for iterative refinement.
 
-        Args:
-            decoder_out (tuple): output from the decoder containing the output tokens and states
-            encoder_out (Tensor): output from the encoder
-            eos_penalty (float, optional): penalty for EOS token
-            max_iter (int, optional): maximum number of iterations (default 10)
-            max_ratio (float, optional): maximum ratio of the target length to the source length
+    Args:
+        decoder_out (tuple): output from the decoder containing the output tokens and states
+        encoder_out (Tensor): output from the encoder
+        eos_penalty (float, optional): penalty for EOS token
+        max_iter (int, optional): maximum number of iterations (default 10)
+        max_ratio (float, optional): maximum ratio of the target length to the source length
 
-        Returns:
-            tuple:
-                - new_decoder_out (Tensor): updated decoder output
-                - extra (dict): additional decoding results
-        """
-        for step in range(max_iter):
-            decoder_result = self.decoder(
-                normalize=False,
-                prev_output_tokens=decoder_out[0],
-                encoder_out=encoder_out,
-                **kwargs
-            )
-            if isinstance(decoder_result, tuple):
-                x, extra = decoder_result
-            else:
-                x = decoder_result
-                extra = {}
+    Returns:
+        tuple:
+            - new_decoder_out (Tensor): updated decoder output
+            - extra (dict): additional decoding results
+    """
+    for step in range(max_iter):
+        decoder_result = self.decoder(
+            normalize=False,
+            prev_output_tokens=decoder_out[0],
+            encoder_out=encoder_out,
+            **kwargs
+        )
+        if isinstance(decoder_result, tuple):
+            x, extra = decoder_result
+        else:
+            x = decoder_result
+            extra = {}
 
-            if max_iter > 1 and eos_penalty is not None:
-                # apply length penalty
-                eos_penalty_tensor = torch.ones_like(x) * eos_penalty
-                eos_penalty_tensor = eos_penalty_tensor.masked_fill(decoder_out[0].ne(self.decoder.padding_idx), 0)
-                x = x + eos_penalty_tensor
+        if max_iter > 1 and eos_penalty is not None:
+            # apply length penalty
+            eos_penalty_tensor = torch.ones_like(x) * eos_penalty
+            eos_penalty_tensor = eos_penalty_tensor.masked_fill(decoder_out[0].ne(self.decoder.padding_idx), 0)
+            x = x + eos_penalty_tensor
 
-            # select top-1 (greedy decoding)
+        # Apply temperature
+        x = x / self.temperature
+
+        # Multinomial sampling if enabled, otherwise argmax
+        if self.sampling:
+            probs = F.softmax(x, dim=-1)
+            sampled_tokens = torch.multinomial(probs.view(-1, probs.size(-1)), 1).view(x.size()[:-1])
+            x = sampled_tokens
+        else:
             x = x.argmax(-1)
-            decoder_out = (x, extra)
 
-        return decoder_out, extra
+        decoder_out = (x, extra)
+
+    return decoder_out, extra
+
+
+
 
