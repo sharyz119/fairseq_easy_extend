@@ -14,6 +14,7 @@ import collections
 from dataclasses import field, dataclass
 
 import omegaconf
+import torch
 from fairseq.models import register_model
 from fairseq.models.nat import CMLMNATransformerModel
 from fairseq.models.transformer import TransformerConfig
@@ -53,6 +54,7 @@ class CMLMTransformerConfig(TransformerConfig):
     label_smoothing: float = field(default=0.1, metadata={"help": "label smoothing"})
 
 @register_model("cmlm_transformer_base", dataclass=CMLMTransformerConfig)
+
 class BaseCMLMNATransformerModel(CMLMNATransformerModel):
 
     @classmethod
@@ -69,3 +71,37 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
             cfg = convert_omegaconf_to_namesapce(cfg)
         model = super().build_model(cfg, task)
         return model
+
+
+    def forward_decoder(self, decoder_out, encoder_out, temperature=1.0, sampling = False, **unused):
+        x, extra = self.decoder(
+            normalize=False,
+            prev_output_tokens=decoder_out[0],
+            encoder_out=encoder_out,
+            temperature=temperature,
+            sampling=sampling,
+        )
+
+        if sampling:
+            # apply temperature scaling
+            x = x / temperature
+            # perform multinomial sampling
+            x = torch.multinomial(torch.softmax(x, dim = 1), num_samples = 1).squeeze(-1)
+
+        else:
+            # use argmax for greedy decoding
+            # x = torch.argmax(x, dim = -1)
+            x = x.argmax(dim = -1)
+
+        return x, extra
+
+    # def forward_decoder(self, decoder_out, encoder_out, temperature=1.0, sampling=False, **unused):
+    #     x, extra = self.decoder(normalize=False, prev_output_tokens=decoder_out[0], encoder_out=encoder_out,
+    #                             temperature=temperature)
+    #
+    #     if sampling:
+    #         x = torch.multinomial(torch.softmax(x / temperature, dim=-1), num_samples=1).squeeze(-1)
+    #     else:
+    #         x = x.argmax(dim=-1)
+    #
+    #     return x, extra
