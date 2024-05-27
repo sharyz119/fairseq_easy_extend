@@ -61,6 +61,22 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
         return model
 
     def forward_decoder(self, decoder_out, encoder_out, eos_penalty=None, max_iter=10, max_ratio=None, sampling_method='max', **kwargs):
+    """
+    Run the decoder forward pass for iterative refinement.
+
+    Args:
+        decoder_out (tuple): output from the decoder containing the output tokens and states
+        encoder_out (Tensor): output from the encoder
+        eos_penalty (float, optional): penalty for EOS token
+        max_iter (int, optional): maximum number of iterations (default 10)
+        max_ratio (float, optional): maximum ratio of the target length to the source length
+        sampling_method (str, optional): sampling method to use ('max' or 'multinomial')
+
+    Returns:
+        tuple:
+            - new_decoder_out (Tensor): updated decoder output
+            - extra (dict): additional decoding results
+    """
     for step in range(max_iter):
         decoder_result = self.decoder(
             normalize=False,
@@ -75,6 +91,7 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
             extra = {}
 
         if max_iter > 1 and eos_penalty is not None:
+            # apply length penalty
             eos_penalty_tensor = torch.ones_like(x) * eos_penalty
             eos_penalty_tensor = eos_penalty_tensor.masked_fill(decoder_out[0].ne(self.decoder.padding_idx), 0)
             x = x + eos_penalty_tensor
@@ -88,7 +105,6 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
         decoder_out = (x, extra)
 
     return decoder_out, extra
-
 
 
    
