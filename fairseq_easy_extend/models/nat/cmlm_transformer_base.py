@@ -96,11 +96,19 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
             eos_penalty_tensor = eos_penalty_tensor.masked_fill(decoder_out[0].ne(self.decoder.padding_idx), 0)
             x = x + eos_penalty_tensor
 
+        # if sampling_method == 'max':
+        #     x = x.argmax(-1)
+        # elif sampling_method == 'multinomial':
+        #     x = F.softmax(x, dim=-1)
+        #     x = torch.multinomial(x.view(-1, x.size(-1)), 1).view(x.size()[:-1])
+
         if sampling_method == 'max':
-            x = x.argmax(-1)
-        elif sampling_method == 'multinomial':
-            x = F.softmax(x, dim=-1)
-            x = torch.multinomial(x.view(-1, x.size(-1)), 1).view(x.size()[:-1])
+                x = x.argmax(-1)
+            elif sampling_method == 'multinomial':
+                x = torch.multinomial(F.softmax(x, dim=-1), 1).squeeze(-1)
+            else:
+                raise ValueError(f"Unsupported sampling method: {sampling_method}")
+
         
         decoder_out = (x, extra)
 
